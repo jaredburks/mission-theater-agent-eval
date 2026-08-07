@@ -1,0 +1,7 @@
+# Core env + harness + baselines: standard library only. Nothing required.
+# Optional extras:
+matplotlib>=3.7   # plots in the report (report still works without it)
+anthropic>=0.40   # only for AnthropicAgent
+ollama>=0.4       # only for OllamaAgent (local models)
+openai>=1.40      # only for OpenAIAgent
+pytest>=7.0       # only for the test suite
