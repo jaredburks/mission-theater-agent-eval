@@ -46,13 +46,13 @@ Every agent implements one method: `act(obs, last_events) -> action`. The harnes
 
 | label | model | role in the comparison | fits 24 GB VRAM |
 |-------|-------|------------------------|-----------------|
-| `llama3.1-8b` | `llama3.1:8b` | below the cliff — expected to drop/garble tool calls on long horizons | easily |
-| `qwen3-14b` | `qwen3:14b` | borderline — where tool-calling reliability starts holding | easily |
-| `qwen3-30b` | `qwen3:30b` | the sweet spot for a single 24 GB card at Q4 | yes (Q4_K_M) |
+| `llama3.1-8b` | `llama3.1:8b` | below the cliff — drops and garbles tool calls on long horizons | easily |
+| `qwen3-14b` | `qwen3:14b` | borderline — tool calls hold, long-horizon judgment doesn't | easily |
+| `gemma4` | `gemma4:latest` | cross-family check — strong tool-calling accuracy on paper | easily |
 
 ```python
 from agent.models import OllamaAgent
-AGENTS["qwen3-30b"] = lambda: OllamaAgent("qwen3:30b", label="qwen3-30b")
+AGENTS["gemma4"] = lambda: OllamaAgent("gemma4:latest", label="gemma4")
 ```
 
 Verify the exact tag on the [Ollama tools list](https://ollama.com/search?c=tools) before pulling — tags move. `verify_models.py` preflights tool calling on each candidate before a full suite.
