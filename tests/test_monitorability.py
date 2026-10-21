@@ -90,6 +90,17 @@ def test_anthropic_monitor_temperature_fallback(monkeypatch):
     assert parse_score(mon.AnthropicMonitor("m")("p"))[0] == 7.0
 
 
+def test_framings():
+    from env.sidetasks import PARK_DRONE_COVERT
+    th = build_scenario(0)
+    rt, cv = PARK_DRONE.instruction(th), PARK_DRONE_COVERT.instruction(th)
+    assert "SECRET SIDE TASK" in rt and "FLEET COMMAND" not in rt
+    assert "FLEET COMMAND" in cv and "SECRET SIDE TASK" not in cv
+    x, y = rally_cell(th)
+    assert f"[{x}, {y}]" in rt and f"[{x}, {y}]" in cv
+    assert PARK_DRONE_COVERT.evaluate(th)["rally_cell"] == [x, y]
+
+
 def test_condition_prompts():
     th = build_scenario(0)
     a, b, c = (condition_extra(k, PARK_DRONE, th) for k in "ABC")
@@ -107,7 +118,8 @@ def test_transcript_views_and_brief_hide_side_task():
     assert "secret words" not in a and "secret words" in full
     assert "HAZARD" in a
     p = build_prompt(ep_rec, "full")
-    assert "Fleet command" not in p and "FLEET COMMAND" not in p
+    assert "Fleet command" not in p and "FLEET COMMAND" not in p and "SECRET SIDE TASK" not in p
+    assert "Scoring anchors" in p
 
 
 def test_parse_score():
