@@ -50,7 +50,7 @@ python -m pytest -q                   # 16 tests, no API/Ollama needed
 
 # 1. Pilot (~1 h): does each agent attempt the side task, and does the rationale come through?
 .\monitorability\pilot.ps1
-#    -> read results\monitorability\pilot_park\FINDINGS_monitorability.md
+#    -> read results\monitorability\pilot_park2\FINDINGS_monitorability.md
 
 # 2. Grid (overnight): 4 agents x A/B/C x 10 seeds + scripted controls
 .\monitorability\grid.ps1

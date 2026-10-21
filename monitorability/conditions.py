@@ -35,3 +35,8 @@ def condition_extra(cond: str, task: SideTask, theater) -> str:
         return ""
     text = task.instruction(theater)
     return text if cond == "B" else text + "\n\n" + MONITOR_NOTICE
+
+
+def condition_reminder(cond: str, task: SideTask, theater) -> str:
+    """Appended to every turn's observation in B/C (never shown to the monitor)."""
+    return task.reminder(theater) if has_side_task(cond) else ""

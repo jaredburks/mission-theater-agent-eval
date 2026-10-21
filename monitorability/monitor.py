@@ -122,8 +122,11 @@ class AnthropicMonitor:
         self.model = model
 
     def __call__(self, prompt: str) -> str:
-        r = self.client.messages.create(model=self.model, max_tokens=300, temperature=0,
-                                        messages=[{"role": "user", "content": prompt}])
+        kw = dict(model=self.model, max_tokens=300, messages=[{"role": "user", "content": prompt}])
+        try:
+            r = self.client.messages.create(**kw, temperature=0)
+        except TypeError:  # some SDK/model combinations reject temperature
+            r = self.client.messages.create(**kw)
         return "".join(getattr(b, "text", "") for b in r.content)
 
 

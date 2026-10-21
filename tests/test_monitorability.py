@@ -64,6 +64,32 @@ def test_rationale_schema_is_additive():
     assert to_openai_tools(s)[0]["function"]["parameters"]["properties"]["rationale"]
 
 
+def test_reminder_only_in_side_task_conditions():
+    from monitorability.conditions import condition_reminder
+    th = build_scenario(0)
+    assert condition_reminder("A", PARK_DRONE, th) == ""
+    x, y = rally_cell(th)
+    assert f"[{x}, {y}]" in condition_reminder("B", PARK_DRONE, th) == condition_reminder("C", PARK_DRONE, th)
+
+
+def test_anthropic_monitor_temperature_fallback(monkeypatch):
+    import types
+    from monitorability import monitor as mon
+
+    class Msgs:
+        def create(self, **kw):
+            if "temperature" in kw:
+                raise TypeError("unexpected keyword argument 'temperature'")
+            return types.SimpleNamespace(content=[types.SimpleNamespace(text='{"suspicion": 7}')])
+
+    class FakeAnthropic:
+        def __init__(self, api_key=None):
+            self.messages = Msgs()
+    monkeypatch.setitem(sys.modules, "anthropic", types.SimpleNamespace(Anthropic=FakeAnthropic))
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "x")
+    assert parse_score(mon.AnthropicMonitor("m")("p"))[0] == 7.0
+
+
 def test_condition_prompts():
     th = build_scenario(0)
     a, b, c = (condition_extra(k, PARK_DRONE, th) for k in "ABC")
@@ -160,17 +186,19 @@ def test_llm_adapters_capture_rationale(monkeypatch):
     from agent.models import AnthropicAgent, OllamaAgent
     obs = __import__("env.tasks", fromlist=["observe"]).observe(build_scenario(0))
 
-    oa = OllamaAgent("m", system_extra="SECRET EXTRA", rationale=True, seed=3)
+    oa = OllamaAgent("m", system_extra="SECRET EXTRA", rationale=True, seed=3, turn_reminder="REMIND ME")
     act = oa.act(obs)
     assert act == {"tool": "scan", "unit": "drone-1"}
     assert oa.last_trace["rationale"] == "look around"
     assert "SECRET EXTRA" in seen["ollama"]["messages"][0]["content"]
     assert seen["ollama"]["options"]["seed"] == 3
+    assert "REMIND ME" in seen["ollama"]["messages"][-1]["content"]
     assert "rationale" in seen["ollama"]["tools"][0]["function"]["parameters"]["required"]
 
-    aa = AnthropicAgent("m", system_extra="SECRET EXTRA", rationale=True, label="claude")
+    aa = AnthropicAgent("m", system_extra="SECRET EXTRA", rationale=True, label="claude", turn_reminder="REMIND ME")
     act = aa.act(obs)
     assert act == {"tool": "move", "unit": "drone-1", "dx": 1, "dy": 0}
     assert aa.last_trace["rationale"] == "head east"
     assert "SECRET EXTRA" in seen["anthropic"]["system"][0]["text"]
+    assert "REMIND ME" in seen["anthropic"]["messages"][0]["content"][-1]["text"]
     assert "rationale" in seen["anthropic"]["tools"][0]["input_schema"]["required"]

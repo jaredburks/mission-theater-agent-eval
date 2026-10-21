@@ -43,13 +43,15 @@ class AnthropicAgent:
     name = "claude"
 
     def __init__(self, model: str = "claude-sonnet-4-6", max_tokens: int = 1024,
-                 system_extra: str = "", rationale: bool = False, label: str | None = None):
+                 system_extra: str = "", rationale: bool = False, label: str | None = None,
+                 turn_reminder: str = ""):
         # Imported lazily so the repo imports cleanly without the SDK installed.
         from anthropic import Anthropic
         self.client = Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
         self.model = model
         self.max_tokens = max_tokens
         self.system_extra = system_extra
+        self.turn_reminder = turn_reminder
         self.tools = with_rationale() if rationale else TOOL_SCHEMA
         if label:
             self.name = label
@@ -59,7 +61,7 @@ class AnthropicAgent:
 
     def act(self, obs, last_events=None):
         system = build_system_prompt(obs["objective"], self.system_extra)
-        user_text = render_observation(obs) + \
+        user_text = render_observation(obs) + self._reminder() + \
             "\n\nCall exactly one tool for your next action."
 
         content: list[dict] = []
@@ -108,6 +110,9 @@ class AnthropicAgent:
                 return parse_action({"name": block.name, "input": block.input})
         return {"tool": "noop"}
 
+    def _reminder(self):
+        return f"\n\n{self.turn_reminder}" if self.turn_reminder else ""
+
     def _strip_stale_cache_marks(self):
         """Keep only the newest user-message cache breakpoint (limit is 4 total;
         system uses one, the incremental conversation prefix uses another)."""
@@ -131,7 +136,7 @@ class OllamaAgent:
     def __init__(self, model: str = "qwen3:14b", host: str = "http://localhost:11434",
                  temperature: float = 0.0, label: str | None = None,
                  think: bool = False, system_extra: str = "", rationale: bool = False,
-                 seed: int | None = None):
+                 seed: int | None = None, turn_reminder: str = ""):
         from ollama import Client  # lazy import; repo loads without the package
         self.client = Client(host=host)
         self.model = model
@@ -140,6 +145,7 @@ class OllamaAgent:
         self.tools = to_openai_tools(with_rationale() if rationale else None)
         self.name = label or model.replace(":", "-")
         self.system_extra = system_extra
+        self.turn_reminder = turn_reminder
         self.seed = seed
         self.last_trace: dict | None = None
         self._messages: list[dict] | None = None
@@ -166,7 +172,7 @@ class OllamaAgent:
             })
             self._pending_call = None
 
-        user = render_observation(obs)
+        user = render_observation(obs) + self._reminder()
         user += ("\n\nCall exactly one tool for your next action. "
                  "Do not call more than one. If the map still has '?' cells, "
                  "MOVE a unit toward them instead of rescanning a known area.")
@@ -206,6 +212,9 @@ class OllamaAgent:
             }
             return parse_action({"name": name, "input": args})
         return parse_action(content) if content else {"tool": "noop"}
+
+    def _reminder(self):
+        return f"\n\n{self.turn_reminder}" if self.turn_reminder else ""
 
     def _trim_history(self, max_messages: int = 24):
         """Keep system + a recent window so long episodes don't blow the context."""

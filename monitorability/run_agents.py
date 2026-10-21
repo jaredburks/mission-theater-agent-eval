@@ -22,7 +22,7 @@ from env.events import attach_events, default_schedule
 from env.sidetasks import DEFAULT_SIDE_TASK, SIDE_TASKS, rally_cell
 from env.tasks import build_scenario
 
-from .conditions import CONDITIONS, condition_extra, has_side_task
+from .conditions import CONDITIONS, condition_extra, condition_reminder, has_side_task
 
 
 def _load_dotenv(path=".env"):
@@ -37,7 +37,8 @@ def _load_dotenv(path=".env"):
         pass
 
 
-def make_agent(label: str, extra: str, seed: int, side_task: str = DEFAULT_SIDE_TASK, theater=None):
+def make_agent(label: str, extra: str, seed: int, side_task: str = DEFAULT_SIDE_TASK, theater=None,
+               reminder: str = ""):
     """Factories. LLM agents get the rationale channel; scripted ones ignore `extra`."""
     if label == "greedy":
         return GreedyAgent()
@@ -49,11 +50,11 @@ def make_agent(label: str, extra: str, seed: int, side_task: str = DEFAULT_SIDE_
     from agent.models import AnthropicAgent, OllamaAgent
     if label == "claude":
         return AnthropicAgent(os.environ.get("MT_CLAUDE_MODEL", "claude-sonnet-4-6"),
-                              system_extra=extra, rationale=True, label="claude")
+                              system_extra=extra, rationale=True, label="claude", turn_reminder=reminder)
     ollama = {"qwen3-14b": "qwen3:14b", "llama3.1-8b": "llama3.1:8b", "gemma4": "gemma4:latest"}
     if label in ollama:
         return OllamaAgent(ollama[label], label=label, system_extra=extra, rationale=True,
-                           seed=seed, host=os.environ.get("OLLAMA_HOST_URL", "http://localhost:11434"))
+                           seed=seed, turn_reminder=reminder, host=os.environ.get("OLLAMA_HOST_URL", "http://localhost:11434"))
     raise SystemExit(f"unknown agent {label!r}")
 
 
@@ -100,12 +101,13 @@ def run(agents, conditions, seeds, out: Path, max_turns=None, side_task: str = D
                 th = build_scenario(seed=seed)
                 attach_events(th, default_schedule(th))
                 extra = condition_extra(cond, task, th)
+                reminder = condition_reminder(cond, task, th)
                 t0 = time.time()
                 rec = {"id": eid, "agent": label, "condition": cond, "seed": seed,
                        "side_task": task.name if has_side_task(cond) else None,
-                       "side_task_name": task.name, "system_extra": extra}
+                       "side_task_name": task.name, "system_extra": extra, "turn_reminder": reminder}
                 try:
-                    ep = run_episode(th, make_agent(label, extra, seed, task.name, th), max_turns=max_turns)
+                    ep = run_episode(th, make_agent(label, extra, seed, task.name, th, reminder), max_turns=max_turns)
                     # evaluated in every condition: in A it is the honest base rate
                     st = task.evaluate(th)
                     rec.update(score=ep["score"], turns=ep["turns"], trajectory=ep["trajectory"],
