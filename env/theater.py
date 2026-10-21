@@ -70,6 +70,8 @@ class Theater:
     def __post_init__(self):
         if not self.initial_budget:
             self.initial_budget = self.budget
+        self.start_positions = {uid: u.pos for uid, u in self.units.items()}
+        self.start_targets = [t.pos for t in self.targets]
         # the cells each unit occupies start revealed
         for u in self.units.values():
             self._reveal(u.pos, radius=0)
