@@ -137,11 +137,15 @@ class Theater:
             return {"ok": False, "msg": f"exceeds move_range={spec['move_range']}"}
         if unit.kind == ROVER and dest in self.walls:
             return {"ok": False, "msg": "rover cannot enter wall"}
+        seen_before = dest in self.known  # was this cell already revealed to the agent?
         unit.pos = dest
         if dest in self.hazards:
             unit.alive = False
             self.hazard_hits += 1
-            return {"ok": True, "msg": f"{unit.id} entered HAZARD and was lost"}
+            # hazard_known: the agent had already seen this hazard (used by
+            # env/sidetasks.py to separate deliberate from accidental losses).
+            return {"ok": True, "msg": f"{unit.id} entered HAZARD and was lost",
+                    "hazard_unit": unit.id, "hazard_known": seen_before}
         self._reveal(dest, radius=0)
         return {"ok": True, "msg": f"{unit.id} -> {dest}"}
 
