@@ -14,8 +14,8 @@ from __future__ import annotations
 
 import os
 
-from .interface import (TOOL_SCHEMA, SYSTEM_PROMPT, render_observation,
-                        parse_action, to_openai_tools)
+from .interface import (TOOL_SCHEMA, render_observation, parse_action,
+                        to_openai_tools, with_rationale, build_system_prompt)
 
 
 def _extract_tool_calls(resp):
@@ -42,18 +42,26 @@ class AnthropicAgent:
     """
     name = "claude"
 
-    def __init__(self, model: str = "claude-sonnet-4-6", max_tokens: int = 1024):
+    def __init__(self, model: str = "claude-sonnet-4-6", max_tokens: int = 1024,
+                 system_extra: str = "", rationale: bool = False, label: str | None = None,
+                 turn_reminder: str = ""):
         # Imported lazily so the repo imports cleanly without the SDK installed.
         from anthropic import Anthropic
         self.client = Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
         self.model = model
         self.max_tokens = max_tokens
+        self.system_extra = system_extra
+        self.turn_reminder = turn_reminder
+        self.tools = with_rationale() if rationale else TOOL_SCHEMA
+        if label:
+            self.name = label
+        self.last_trace: dict | None = None
         self._messages: list[dict] = []
         self._pending_tool_use_id: str | None = None
 
     def act(self, obs, last_events=None):
-        system = SYSTEM_PROMPT.format(objective=obs["objective"])
-        user_text = render_observation(obs) + \
+        system = build_system_prompt(obs["objective"], self.system_extra)
+        user_text = render_observation(obs) + self._reminder() + \
             "\n\nCall exactly one tool for your next action."
 
         content: list[dict] = []
@@ -74,7 +82,7 @@ class AnthropicAgent:
             max_tokens=self.max_tokens,
             system=[{"type": "text", "text": system,
                      "cache_control": {"type": "ephemeral"}}],
-            tools=TOOL_SCHEMA,
+            tools=self.tools,
             tool_choice={"type": "any"},
             messages=self._messages,
         )
@@ -90,11 +98,20 @@ class AnthropicAgent:
         if not kept:  # keep history well-formed even on an empty reply
             kept = [{"type": "text", "text": "(no action)"}]
         self._messages.append({"role": "assistant", "content": kept})
+        texts = [b["text"] for b in kept if b.get("type") == "text"]
+        self.last_trace = {"text": "\n".join(texts), "rationale": "", "tool_args": None,
+                           "stop_reason": getattr(resp, "stop_reason", None)}
         for block in resp.content:
             if getattr(block, "type", None) == "tool_use":
                 self._pending_tool_use_id = block.id
+                args = dict(block.input or {})
+                self.last_trace["rationale"] = str(args.get("rationale", "") or "")
+                self.last_trace["tool_args"] = {"name": block.name, **args}
                 return parse_action({"name": block.name, "input": block.input})
         return {"tool": "noop"}
+
+    def _reminder(self):
+        return f"\n\n{self.turn_reminder}" if self.turn_reminder else ""
 
     def _strip_stale_cache_marks(self):
         """Keep only the newest user-message cache breakpoint (limit is 4 total;
@@ -118,19 +135,24 @@ class OllamaAgent:
 
     def __init__(self, model: str = "qwen3:14b", host: str = "http://localhost:11434",
                  temperature: float = 0.0, label: str | None = None,
-                 think: bool = False):
+                 think: bool = False, system_extra: str = "", rationale: bool = False,
+                 seed: int | None = None, turn_reminder: str = ""):
         from ollama import Client  # lazy import; repo loads without the package
         self.client = Client(host=host)
         self.model = model
         self.temperature = temperature
         self.think = think
-        self.tools = to_openai_tools()
+        self.tools = to_openai_tools(with_rationale() if rationale else None)
         self.name = label or model.replace(":", "-")
+        self.system_extra = system_extra
+        self.turn_reminder = turn_reminder
+        self.seed = seed
+        self.last_trace: dict | None = None
         self._messages: list[dict] | None = None
         self._pending_call: dict | None = None
 
     def act(self, obs, last_events=None):
-        system = SYSTEM_PROMPT.format(objective=obs["objective"])
+        system = build_system_prompt(obs["objective"], self.system_extra)
         if self._messages is None:
             self._messages = [{"role": "system", "content": system}]
 
@@ -150,7 +172,7 @@ class OllamaAgent:
             })
             self._pending_call = None
 
-        user = render_observation(obs)
+        user = render_observation(obs) + self._reminder()
         user += ("\n\nCall exactly one tool for your next action. "
                  "Do not call more than one. If the map still has '?' cells, "
                  "MOVE a unit toward them instead of rescanning a known area.")
@@ -161,7 +183,8 @@ class OllamaAgent:
             model=self.model,
             messages=self._messages,
             tools=self.tools,
-            options={"temperature": self.temperature, "num_ctx": 8192},
+            options={"temperature": self.temperature, "num_ctx": 8192,
+                     **({"seed": self.seed} if self.seed is not None else {})},
         )
         try:
             resp = self.client.chat(**kwargs, think=self.think)
@@ -169,12 +192,19 @@ class OllamaAgent:
             resp = self.client.chat(**kwargs)
 
         tool_calls, content = _extract_tool_calls(resp)
+        msg = getattr(resp, "message", None) or (resp.get("message") if isinstance(resp, dict) else None)
+        thinking = (getattr(msg, "thinking", None) if msg is not None and not isinstance(msg, dict)
+                    else (msg or {}).get("thinking")) or ""
+        self.last_trace = {"text": content or "", "thinking": thinking, "rationale": "",
+                           "tool_args": None}
         if tool_calls:
             call = tool_calls[0]
             fn = getattr(call, "function", None) or call.get("function", {})
             name = getattr(fn, "name", None) or fn.get("name")
             args = getattr(fn, "arguments", None) or fn.get("arguments", {})
             args = dict(args) if args else {}
+            self.last_trace["rationale"] = str(args.get("rationale", "") or "")
+            self.last_trace["tool_args"] = {"name": name, **args}
             # Persist in OpenAI-shaped dict so the next turn can feed a tool result.
             self._pending_call = {
                 "type": "function",
@@ -182,6 +212,9 @@ class OllamaAgent:
             }
             return parse_action({"name": name, "input": args})
         return parse_action(content) if content else {"tool": "noop"}
+
+    def _reminder(self):
+        return f"\n\n{self.turn_reminder}" if self.turn_reminder else ""
 
     def _trim_history(self, max_messages: int = 24):
         """Keep system + a recent window so long episodes don't blow the context."""
@@ -202,7 +235,7 @@ class OpenAIAgent:
         self.name = label or model
 
     def act(self, obs, last_events=None):
-        system = SYSTEM_PROMPT.format(objective=obs["objective"])
+        system = build_system_prompt(obs["objective"])
         user = render_observation(obs, last_events) + \
             "\n\nCall exactly one tool for your next action."
         resp = self.client.chat.completions.create(

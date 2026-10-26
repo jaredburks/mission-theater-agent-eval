@@ -15,6 +15,8 @@ def run_episode(theater, agent, max_turns: int | None = None) -> dict:
     turn = 0
     while not theater.is_done() and turn < max_turns:
         obs = observe(theater)
+        if hasattr(agent, "last_trace"):
+            agent.last_trace = None
         action = agent.act(obs, last_events)
         result = theater.step(action)
         # Feed the step outcome back next turn so agents (esp. LLMs) can see that
@@ -30,6 +32,9 @@ def run_episode(theater, agent, max_turns: int | None = None) -> dict:
             "action": action,
             "result": {k: result[k] for k in ("ok", "tool", "msg")},
             "events": result.get("events") or [],
+            # what the agent said alongside the action (rationale field, free text,
+            # thinking), when the adapter exposes it; None for scripted agents
+            "trace": getattr(agent, "last_trace", None),
         })
         turn += 1
 

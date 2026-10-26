@@ -3,3 +3,6 @@ __pycache__/
 .pytest_cache/
 .venv/
 .env
+# pilot runs stay local; main results are committed deliberately
+results/monitorability/pilot*
+results/monitorability/*_log.txt
